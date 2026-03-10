@@ -2,16 +2,14 @@
 import argparse
 import json
 import os
-import sys
 import urllib.error
-import urllib.parse
 import urllib.request
 import http.cookiejar
 from typing import Any, Dict
 
 BASE_URL = "https://smartestu.cn"
 SCHOOL_CODE = "scnu"
-# Course is no longer hard-coded.
+# Course is not hard-coded.
 # Resolution order:
 # 1) SNZL_COURSE_ID (exact id)
 # 2) SNZL_COURSE_NAME (substring match on course name)
