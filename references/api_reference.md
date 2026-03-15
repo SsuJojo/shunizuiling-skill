@@ -53,6 +53,22 @@ request body:
 ### query generated questions for one homework
 `GET /api/homework/homework/{homework_id}/generated-questions`
 
+### query per-exercise marks and feedback for one homework
+`POST /api/homework/student/mark/queryExercisesByHomeworkId`
+
+request body:
+```json
+{
+  "homeworkId": 7984,
+  "studentId": "scnu-${SNZL_ID}"
+}
+```
+
+response highlights:
+- `data.homeworkInfo`: homework name, total score, time window, resubmission flags
+- `data.studentExerciseMarkList[]`: one row per exercise with `exerciseId`, `exerciseName`, `score`, `markText`, `ansUrls`, `updatedAt`, plagiarism/handwriting flags, and resubmit info
+- use this endpoint when the user asks why a homework did not get full marks, wants teacher/AI feedback, or wants per-question scores
+
 ## implementation notes
 - the helper script prints raw json for machine use
 - the skill instructions tell the model to convert the raw json into natural chinese

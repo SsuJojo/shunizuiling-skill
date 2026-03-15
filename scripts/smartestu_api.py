@@ -19,6 +19,7 @@ LOGIN_PATH = "/api/auth/login"
 COURSE_QUERY_PATH = "/api/homework/student/course/query"
 HOMEWORK_QUERY_PATH = "/api/homework/student/mark/queryHomeworks"
 QUESTION_PATH_TEMPLATE = "/api/homework/homework/{homework_id}/generated-questions"
+EXERCISE_MARKS_PATH = "/api/homework/student/mark/queryExercisesByHomeworkId"
 
 DEFAULT_HEADERS = {
     "Accept": "application/json, text/plain, */*",
@@ -152,6 +153,16 @@ class SmartestuClient:
             payload=None,
         )
 
+    def query_exercise_marks(self, homework_id: int, student_id: str | None = None) -> Any:
+        return self._request(
+            "POST",
+            EXERCISE_MARKS_PATH,
+            payload={
+                "homeworkId": homework_id,
+                "studentId": student_id or self.school_user_id,
+            },
+        )
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="smartestu api helper for the openclaw skill")
@@ -162,6 +173,9 @@ def main() -> int:
     sub.add_parser("homeworks", help="list homeworks for a resolved course id (not hard-coded)")
     q = sub.add_parser("questions", help="get generated questions for a homework id")
     q.add_argument("homework_id", type=int, help="homework id such as 7984")
+    m = sub.add_parser("exercise-marks", help="get per-exercise scores and feedback for a homework id")
+    m.add_argument("homework_id", type=int, help="homework id such as 7984")
+    m.add_argument("--student-id", dest="student_id", help="override studentId such as scnu-20254002061")
 
     args = parser.parse_args()
 
@@ -185,6 +199,8 @@ def main() -> int:
             output = client.query_homeworks()
         elif args.command == "questions":
             output = client.query_questions(args.homework_id)
+        elif args.command == "exercise-marks":
+            output = client.query_exercise_marks(args.homework_id, student_id=args.student_id)
         else:
             raise RuntimeError(f"unsupported command: {args.command}")
     except Exception as exc:
