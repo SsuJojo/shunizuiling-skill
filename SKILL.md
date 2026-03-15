@@ -55,7 +55,14 @@ Follow these steps in order.
    - For questions: group by question type when possible, mention count, and highlight question stem or key requirements.
    - For exercise marks: mention total score first, then list each exercise's score and `markText`; explicitly point out which exercise lost points and quote the platform's reason when present.
 
-5. Keep secrets safe:
+5. Keep the chat output quiet:
+   - Do NOT narrate internal execution steps such as “继续查询”, “开始读取”, “整理结果”.
+   - Default to no process narration at all; just return the final answer once the result is ready.
+   - If a progress message is helpful because the request takes time, send only one short Chinese message: `正在查询...`
+   - Do not send multiple progress updates for the same request unless the user explicitly asks for step-by-step status.
+   - Do not mention script paths, environment variables, login flow, cookies, bearer tokens, or tool names in the user-facing reply unless the user explicitly asks.
+
+6. Keep secrets safe:
    - Never reveal `SNZL_PSWD`.
    - Do not output the full token by default.
    - If login fails, report the error briefly and suggest checking environment variables.
@@ -63,13 +70,15 @@ Follow these steps in order.
 ## Output rules
 
 - Default to concise natural Chinese.
+- Prefer a single final answer with no execution transcript.
+- If a temporary status line is needed, use only: `正在查询...`
 - Only return raw JSON when the user explicitly asks for raw output.
 - If a field is missing, say that the platform response did not include it.
 - When dates appear, preserve the original timestamp and optionally explain it in plain language.
 
 ## Helper script
 
-Use `scripts/smartestu_api.py` for all current API calls. It automatically:
+Resolve the script path relative to this skill directory and use the actual file at `scripts/smartestu_api.py` for all current API calls. It automatically:
 - reads `SNZL_ID` and `SNZL_PSWD`
 - logs in first
 - stores cookies
