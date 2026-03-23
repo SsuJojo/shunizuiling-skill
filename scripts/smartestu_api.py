@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Any, Dict
 
 
+DETAIL_MODE = os.environ.get("SNZL_DETAIL_MODE", "compact").strip().lower()
+
+
 DROP_KEYS = {
     "url",
     "tfSpec",
@@ -57,7 +60,7 @@ def clean_payload(value: Any) -> Any:
     return value
 
 
-def compact_question_block(exercise: Dict[str, Any]) -> Dict[str, Any]:
+def compact_question_block(exercise: Dict[str, Any], include_details: bool = False) -> Dict[str, Any]:
     result: Dict[str, Any] = {
         "id": exercise.get("id"),
         "name": exercise.get("name"),
@@ -88,20 +91,21 @@ def compact_question_block(exercise: Dict[str, Any]) -> Dict[str, Any]:
         if texts:
             result["questionText"] = "\n".join(texts)
 
-    if exercise.get("studentAnswer"):
-        result["studentAnswer"] = exercise.get("studentAnswer")
-    elif exercise.get("answerImages"):
-        result["answerImages"] = exercise.get("answerImages")
+    if include_details:
+        if exercise.get("studentAnswer"):
+            result["studentAnswer"] = exercise.get("studentAnswer")
+        elif exercise.get("answerImages"):
+            result["answerImages"] = exercise.get("answerImages")
 
-    if exercise.get("answers"):
-        answer_texts = [x.get("content") for x in exercise.get("answers", []) if isinstance(x, dict) and x.get("content")]
-        if answer_texts:
-            result["answers"] = answer_texts
+        if exercise.get("answers"):
+            answer_texts = [x.get("content") for x in exercise.get("answers", []) if isinstance(x, dict) and x.get("content")]
+            if answer_texts:
+                result["answers"] = answer_texts
 
     return clean_payload(result)
 
 
-def compact_homeworks_output(output: Dict[str, Any]) -> Dict[str, Any]:
+def compact_homeworks_output(output: Dict[str, Any], include_details: bool = False) -> Dict[str, Any]:
     data = output.get("data") or {}
     rows = []
     for course_block in data.get("courseHomeworkDTOList") or []:
@@ -127,7 +131,7 @@ def compact_homeworks_output(output: Dict[str, Any]) -> Dict[str, Any]:
                                 "enableResubmit": hw.get("enableResubmit"),
                                 "resubmitTimes": hw.get("resubmitTimes"),
                                 "exercise_status": hw.get("exercise_status"),
-                                "exercises": [compact_question_block(ex) for ex in hw.get("exercises") or []],
+                                "exercises": [compact_question_block(ex, include_details=include_details) for ex in hw.get("exercises") or []],
                             }
                         )
                         for hw in course_block.get("studentCourseHomeworkDTOList") or []
@@ -135,15 +139,16 @@ def compact_homeworks_output(output: Dict[str, Any]) -> Dict[str, Any]:
                 }
             )
         )
-    return clean_payload({**output, "data": {"courseHomeworkDTOList": rows}})
+    return clean_payload({**output, "data": {"courseHomeworkDTOList": rows, "detailMode": "detail" if include_details else "compact"}})
 
 
-def compact_exercise_marks_output(output: Dict[str, Any]) -> Dict[str, Any]:
+def compact_exercise_marks_output(output: Dict[str, Any], include_details: bool = False) -> Dict[str, Any]:
     data = output.get("data") or {}
     return clean_payload(
         {
             **output,
             "data": {
+                "detailMode": "detail" if include_details else "compact",
                 "homeworkInfo": {
                     "id": data.get("homeworkInfo", {}).get("id"),
                     "name": data.get("homeworkInfo", {}).get("name"),
@@ -161,7 +166,6 @@ def compact_exercise_marks_output(output: Dict[str, Any]) -> Dict[str, Any]:
                             "score": item.get("score"),
                             "status": item.get("status"),
                             "markText": item.get("markText"),
-                            "ansUrls": item.get("ansUrls"),
                             "updatedAt": item.get("updatedAt"),
                             "markPayload": {
                                 "items": [
@@ -175,6 +179,7 @@ def compact_exercise_marks_output(output: Dict[str, Any]) -> Dict[str, Any]:
                                     for sub in ((item.get("markPayload") or {}).get("items") or [])
                                 ]
                             },
+                            **({"ansUrls": item.get("ansUrls")} if include_details and item.get("ansUrls") else {}),
                         }
                     )
                     for item in data.get("studentExerciseMarkList") or []
@@ -392,6 +397,9 @@ def main() -> int:
     m.add_argument("homework_id", type=int, help="homework id such as 7984")
     m.add_argument("--student-id", dest="student_id", help="override studentId such as scnu-20254002061")
 
+    for parser_ in [sub.choices["homeworks"], sub.choices["exercise-marks"], sub.choices["questions"]]:
+        parser_.add_argument("--detail", action="store_true", help="return detail payload instead of compact mode")
+
     args = parser.parse_args()
 
     try:
@@ -422,10 +430,11 @@ def main() -> int:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
         return 1
 
+    include_details = bool(getattr(args, "detail", False)) or DETAIL_MODE == "detail"
     if args.command == "homeworks":
-        output = compact_homeworks_output(output)
+        output = compact_homeworks_output(output, include_details=include_details)
     elif args.command == "exercise-marks":
-        output = compact_exercise_marks_output(output)
+        output = compact_exercise_marks_output(output, include_details=include_details)
     cleaned_output = clean_payload(output)
     print(json.dumps({"ok": True, "data": cleaned_output}, ensure_ascii=False, indent=2))
     return 0
