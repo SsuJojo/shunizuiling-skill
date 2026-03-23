@@ -826,6 +826,12 @@ def run_submission(session_id: str | None, confirm_token: str, allow_live: bool 
 def render_submission_preview(session: Dict[str, Any]) -> Dict[str, Any]:
     plan = session.get("plan") or {}
     homework = session.get("homework") or {}
+    command_preview = plan.get("commandPreview") or []
+    final_submit_command = ""
+    for line in command_preview:
+        if isinstance(line, str) and "submit-run" in line:
+            final_submit_command = line
+            break
     lines = [
         f"这是即将提交的题目：{homework.get('name')}",
         f"作业ID：{homework.get('id')}",
@@ -843,6 +849,8 @@ def render_submission_preview(session: Dict[str, Any]) -> Dict[str, Any]:
             lines.append(f"理解依据：{item['modelReason']}")
     if plan.get("unusedImages"):
         lines.append(f"未使用图片：{'、'.join(plan['unusedImages'])}")
+    if final_submit_command:
+        lines.append(f"最终执行提交命令：{final_submit_command}")
     lines.append("是否确认提交？")
     return {
         "sessionId": session.get("sessionId"),
@@ -851,7 +859,8 @@ def render_submission_preview(session: Dict[str, Any]) -> Dict[str, Any]:
         "parseMode": plan.get("parseMode"),
         "mappingSourceText": plan.get("mappingSourceText"),
         "previewText": "\n".join(lines),
-        "commandPreview": plan.get("commandPreview") or [],
+        "commandPreview": command_preview,
+        "finalSubmitCommand": final_submit_command,
         "mapping": plan.get("mapping") or [],
     }
 
