@@ -44,6 +44,9 @@ Follow these steps in order.
 2. Run the helper script:
    - `python scripts/smartestu_api.py courses`
    - `python scripts/smartestu_api.py homeworks`
+   - `python scripts/smartestu_api.py homeworks --homework-id <homework_id>`
+   - `python scripts/smartestu_api.py homeworks --name <keyword>`
+   - `python scripts/smartestu_api.py homeworks --next`
    - `python scripts/smartestu_api.py exercise-marks <homework_id>`
    - `python scripts/smartestu_api.py questions <homework_id>` only for compatibility; it may probe the endpoint internally, but it must always rewrite the returned generated-question content to an empty payload (`questions: []`, `totalCount: 0`, `hiddenGeneratedQuestions: true`)
 
@@ -52,6 +55,8 @@ Follow these steps in order.
 4. Read the JSON result and summarize it in natural Chinese:
    - For courses: mention course name, teacher, course id, and whether course `1436` exists.
    - For homeworks: mention homework title, homework id, status, score, deadline, and any actionable next step if those fields exist.
+   - Prefer `homeworks --homework-id <id>` or `homeworks --name <keyword>` when the user only wants one homework, to avoid returning the entire course history.
+   - For everyday quick checks, prefer `homeworks --next`, which returns the oldest pending homework by deadline; if no homework is pending, return the first homework as a fallback.
    - For a disabled `questions` response: clearly state that generated questions are intentionally hidden/emptied and should not be treated as the actual homework content.
    - For exercise marks: mention total score first, then list each exercise's score and `markText`; explicitly point out which exercise lost points and quote the platform's reason when present.
 

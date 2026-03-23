@@ -10,6 +10,9 @@ from typing import Any, Dict
 
 
 DETAIL_MODE = os.environ.get("SNZL_DETAIL_MODE", "compact").strip().lower()
+HOMEWORK_FILTER_ID = os.environ.get("SNZL_HOMEWORK_ID", "").strip()
+HOMEWORK_FILTER_NAME = os.environ.get("SNZL_HOMEWORK_NAME", "").strip()
+HOMEWORK_FILTER_LATEST = os.environ.get("SNZL_HOMEWORK_LATEST", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 DROP_KEYS = {
@@ -105,41 +108,54 @@ def compact_question_block(exercise: Dict[str, Any], include_details: bool = Fal
     return clean_payload(result)
 
 
-def compact_homeworks_output(output: Dict[str, Any], include_details: bool = False) -> Dict[str, Any]:
+def compact_homeworks_output(output: Dict[str, Any], include_details: bool = False, homework_id: int | None = None, homework_name: str | None = None, next_pending: bool = False) -> Dict[str, Any]:
     data = output.get("data") or {}
     rows = []
     for course_block in data.get("courseHomeworkDTOList") or []:
+        source_homeworks = list(course_block.get("studentCourseHomeworkDTOList") or [])
+
+        if next_pending:
+            pending = [hw for hw in source_homeworks if str(hw.get("submission_status")) == "not_submitted"]
+            pending.sort(key=lambda hw: str(hw.get("endTime") or "9999-12-31T23:59:59Z"))
+            source_homeworks = pending[:1] if pending else source_homeworks[:1]
+
+        homeworks = []
+        for hw in source_homeworks:
+            if homework_id is not None and hw.get("id") != homework_id:
+                continue
+            if homework_name and homework_name not in str(hw.get("name", "")):
+                continue
+            homeworks.append(
+                clean_payload(
+                    {
+                        "id": hw.get("id"),
+                        "name": hw.get("name"),
+                        "startTime": hw.get("startTime"),
+                        "endTime": hw.get("endTime"),
+                        "teacherName": hw.get("teacherName"),
+                        "totalScore": hw.get("totalScore"),
+                        "score": hw.get("score"),
+                        "status": hw.get("status"),
+                        "submission_status": hw.get("submission_status"),
+                        "review_status": hw.get("review_status"),
+                        "allowCorrection": hw.get("allowCorrection"),
+                        "enableResubmit": hw.get("enableResubmit"),
+                        "resubmitTimes": hw.get("resubmitTimes"),
+                        "exercise_status": hw.get("exercise_status"),
+                        "exercises": [compact_question_block(ex, include_details=include_details) for ex in hw.get("exercises") or []],
+                    }
+                )
+            )
         rows.append(
             clean_payload(
                 {
                     "courseId": course_block.get("courseId"),
                     "courseName": course_block.get("courseName"),
-                    "homeworks": [
-                        clean_payload(
-                            {
-                                "id": hw.get("id"),
-                                "name": hw.get("name"),
-                                "startTime": hw.get("startTime"),
-                                "endTime": hw.get("endTime"),
-                                "teacherName": hw.get("teacherName"),
-                                "totalScore": hw.get("totalScore"),
-                                "score": hw.get("score"),
-                                "status": hw.get("status"),
-                                "submission_status": hw.get("submission_status"),
-                                "review_status": hw.get("review_status"),
-                                "allowCorrection": hw.get("allowCorrection"),
-                                "enableResubmit": hw.get("enableResubmit"),
-                                "resubmitTimes": hw.get("resubmitTimes"),
-                                "exercise_status": hw.get("exercise_status"),
-                                "exercises": [compact_question_block(ex, include_details=include_details) for ex in hw.get("exercises") or []],
-                            }
-                        )
-                        for hw in course_block.get("studentCourseHomeworkDTOList") or []
-                    ],
+                    "homeworks": homeworks,
                 }
             )
         )
-    return clean_payload({**output, "data": {"courseHomeworkDTOList": rows, "detailMode": "detail" if include_details else "compact"}})
+    return clean_payload({**output, "data": {"courseHomeworkDTOList": rows, "detailMode": "detail" if include_details else "compact", "filter": {"homeworkId": homework_id, "homeworkName": homework_name, "next": next_pending}}})
 
 
 def compact_exercise_marks_output(output: Dict[str, Any], include_details: bool = False) -> Dict[str, Any]:
@@ -400,6 +416,10 @@ def main() -> int:
     for parser_ in [sub.choices["homeworks"], sub.choices["exercise-marks"], sub.choices["questions"]]:
         parser_.add_argument("--detail", action="store_true", help="return detail payload instead of compact mode")
 
+    sub.choices["homeworks"].add_argument("--homework-id", type=int, help="filter a single homework by id")
+    sub.choices["homeworks"].add_argument("--name", dest="homework_name", help="filter homeworks by substring match on name")
+    sub.choices["homeworks"].add_argument("--next", action="store_true", help="return the oldest pending homework, or the first homework if none are pending")
+
     args = parser.parse_args()
 
     try:
@@ -431,8 +451,13 @@ def main() -> int:
         return 1
 
     include_details = bool(getattr(args, "detail", False)) or DETAIL_MODE == "detail"
+    env_homework_id = int(HOMEWORK_FILTER_ID) if HOMEWORK_FILTER_ID.isdigit() else None
+    cli_homework_id = getattr(args, "homework_id", None) if args.command == "homeworks" else None
+    effective_homework_id = cli_homework_id or env_homework_id
+    effective_homework_name = (getattr(args, "homework_name", None) or HOMEWORK_FILTER_NAME or None)
+    effective_next = bool(getattr(args, "next", False)) or HOMEWORK_FILTER_NEXT
     if args.command == "homeworks":
-        output = compact_homeworks_output(output, include_details=include_details)
+        output = compact_homeworks_output(output, include_details=include_details, homework_id=effective_homework_id, homework_name=effective_homework_name, next_pending=effective_next)
     elif args.command == "exercise-marks":
         output = compact_exercise_marks_output(output, include_details=include_details)
     cleaned_output = clean_payload(output)
