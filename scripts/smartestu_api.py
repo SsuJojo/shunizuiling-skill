@@ -5,7 +5,183 @@ import os
 import urllib.error
 import urllib.request
 import http.cookiejar
+from pathlib import Path
 from typing import Any, Dict
+
+
+DROP_KEYS = {
+    "url",
+    "tfSpec",
+    "mcqSpec",
+    "objectiveGroupSpec",
+    "answerStructure",
+    "customAnswerTime",
+    "customAppealDeadline",
+    "onlineExamStartedAt",
+    "onlineExamEndedAt",
+    "imageProblemType",
+    "studentSubExercise",
+    "lateSubmissionRecord",
+    "teacherReply",
+    "referenceSolution",
+    "modelOutput",
+    "raw",
+}
+
+
+def clean_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        cleaned: dict[str, Any] = {}
+        for key, child in value.items():
+            if key in DROP_KEYS:
+                continue
+            child_clean = clean_payload(child)
+            if child_clean is None:
+                continue
+            if child_clean == {} or child_clean == []:
+                continue
+            cleaned[key] = child_clean
+        return cleaned
+    if isinstance(value, list):
+        cleaned_list = []
+        for item in value:
+            item_clean = clean_payload(item)
+            if item_clean is None or item_clean == {} or item_clean == []:
+                continue
+            cleaned_list.append(item_clean)
+        return cleaned_list
+    if value is None:
+        return None
+    if isinstance(value, str) and value == "":
+        return None
+    return value
+
+
+def compact_question_block(exercise: Dict[str, Any]) -> Dict[str, Any]:
+    result: Dict[str, Any] = {
+        "id": exercise.get("id"),
+        "name": exercise.get("name"),
+        "questionNum": exercise.get("questionNum"),
+        "score": exercise.get("score"),
+        "questionType": exercise.get("questionType"),
+    }
+
+    question_structure = exercise.get("questionStructure") or []
+    if question_structure:
+        first = question_structure[0] or {}
+        main = first.get("mainQuestion") or {}
+        if main.get("questionMd"):
+            result["questionMd"] = main.get("questionMd")
+        subs = []
+        for sub in first.get("subQuestions") or []:
+            item = {
+                "questionNum": sub.get("questionNum"),
+                "questionMd": sub.get("questionMd"),
+            }
+            item = clean_payload(item)
+            if item:
+                subs.append(item)
+        if subs:
+            result["subQuestions"] = subs
+    elif exercise.get("questions"):
+        texts = [x.get("content") for x in exercise.get("questions", []) if isinstance(x, dict) and x.get("content")]
+        if texts:
+            result["questionText"] = "\n".join(texts)
+
+    if exercise.get("studentAnswer"):
+        result["studentAnswer"] = exercise.get("studentAnswer")
+    elif exercise.get("answerImages"):
+        result["answerImages"] = exercise.get("answerImages")
+
+    if exercise.get("answers"):
+        answer_texts = [x.get("content") for x in exercise.get("answers", []) if isinstance(x, dict) and x.get("content")]
+        if answer_texts:
+            result["answers"] = answer_texts
+
+    return clean_payload(result)
+
+
+def compact_homeworks_output(output: Dict[str, Any]) -> Dict[str, Any]:
+    data = output.get("data") or {}
+    rows = []
+    for course_block in data.get("courseHomeworkDTOList") or []:
+        rows.append(
+            clean_payload(
+                {
+                    "courseId": course_block.get("courseId"),
+                    "courseName": course_block.get("courseName"),
+                    "homeworks": [
+                        clean_payload(
+                            {
+                                "id": hw.get("id"),
+                                "name": hw.get("name"),
+                                "startTime": hw.get("startTime"),
+                                "endTime": hw.get("endTime"),
+                                "teacherName": hw.get("teacherName"),
+                                "totalScore": hw.get("totalScore"),
+                                "score": hw.get("score"),
+                                "status": hw.get("status"),
+                                "submission_status": hw.get("submission_status"),
+                                "review_status": hw.get("review_status"),
+                                "allowCorrection": hw.get("allowCorrection"),
+                                "enableResubmit": hw.get("enableResubmit"),
+                                "resubmitTimes": hw.get("resubmitTimes"),
+                                "exercise_status": hw.get("exercise_status"),
+                                "exercises": [compact_question_block(ex) for ex in hw.get("exercises") or []],
+                            }
+                        )
+                        for hw in course_block.get("studentCourseHomeworkDTOList") or []
+                    ],
+                }
+            )
+        )
+    return clean_payload({**output, "data": {"courseHomeworkDTOList": rows}})
+
+
+def compact_exercise_marks_output(output: Dict[str, Any]) -> Dict[str, Any]:
+    data = output.get("data") or {}
+    return clean_payload(
+        {
+            **output,
+            "data": {
+                "homeworkInfo": {
+                    "id": data.get("homeworkInfo", {}).get("id"),
+                    "name": data.get("homeworkInfo", {}).get("name"),
+                    "totalScore": data.get("homeworkInfo", {}).get("totalScore"),
+                    "startTime": data.get("homeworkInfo", {}).get("startTime"),
+                    "endTime": data.get("homeworkInfo", {}).get("endTime"),
+                    "enableResubmit": data.get("homeworkInfo", {}).get("enableResubmit"),
+                    "resubmitTimes": data.get("homeworkInfo", {}).get("resubmitTimes"),
+                },
+                "studentExerciseMarkList": [
+                    clean_payload(
+                        {
+                            "exerciseId": item.get("exerciseId"),
+                            "exerciseName": item.get("exerciseName"),
+                            "score": item.get("score"),
+                            "status": item.get("status"),
+                            "markText": item.get("markText"),
+                            "ansUrls": item.get("ansUrls"),
+                            "updatedAt": item.get("updatedAt"),
+                            "markPayload": {
+                                "items": [
+                                    clean_payload(
+                                        {
+                                            "questionNumber": sub.get("questionNumber"),
+                                            "scoreStr": sub.get("scoreStr"),
+                                            "errorReason": sub.get("errorReason"),
+                                        }
+                                    )
+                                    for sub in ((item.get("markPayload") or {}).get("items") or [])
+                                ]
+                            },
+                        }
+                    )
+                    for item in data.get("studentExerciseMarkList") or []
+                ],
+            },
+        }
+    )
 
 BASE_URL = "https://smartestu.cn"
 SCHOOL_CODE = "scnu"
@@ -36,6 +212,21 @@ def require_env(name: str) -> str:
     if not value:
         raise RuntimeError(f"missing required environment variable: {name}")
     return value
+
+
+def save_cache(data: Dict[str, Any]) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    CACHE_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def build_memory_hint(platform: str, course: Dict[str, Any] | None, items: list[Dict[str, Any]]) -> Dict[str, Any]:
+    course = course or {}
+    return {
+        "platform": platform,
+        "course": {"title": course.get("name"), "courseId": course.get("id"), "teacher": course.get("teacherName")},
+        "items": [{"homeworkId": x.get("id") or x.get("homeworkId"), "title": x.get("title") or x.get("name"), "status": x.get("status") or x.get("submitStatus"), "deadline": x.get("deadline") or x.get("endTime")} for x in items],
+        "summary": f"{platform}｜{course.get('name') or '未知课程'}｜共{len(items)}项",
+    }
 
 
 class SmartestuClient:
@@ -147,11 +338,35 @@ class SmartestuClient:
         )
 
     def query_questions(self, homework_id: int) -> Any:
-        return self._request(
+        raw = self._request(
             "GET",
             QUESTION_PATH_TEMPLATE.format(homework_id=homework_id),
             payload=None,
         )
+        if not isinstance(raw, dict):
+            return {
+                "code": 200,
+                "msg": "generated questions hidden",
+                "data": {
+                    "homeworkId": homework_id,
+                    "questions": [],
+                    "totalCount": 0,
+                    "hiddenGeneratedQuestions": True,
+                },
+            }
+
+        data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
+        return {
+            **raw,
+            "msg": "generated questions hidden",
+            "data": {
+                "homeworkId": data.get("homeworkId", homework_id),
+                "homeworkName": data.get("homeworkName"),
+                "questions": [],
+                "totalCount": 0,
+                "hiddenGeneratedQuestions": True,
+            },
+        }
 
     def query_exercise_marks(self, homework_id: int, student_id: str | None = None) -> Any:
         return self._request(
@@ -207,7 +422,12 @@ def main() -> int:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
         return 1
 
-    print(json.dumps({"ok": True, "data": output}, ensure_ascii=False, indent=2))
+    if args.command == "homeworks":
+        output = compact_homeworks_output(output)
+    elif args.command == "exercise-marks":
+        output = compact_exercise_marks_output(output)
+    cleaned_output = clean_payload(output)
+    print(json.dumps({"ok": True, "data": cleaned_output}, ensure_ascii=False, indent=2))
     return 0
 
 

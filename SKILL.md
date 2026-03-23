@@ -1,6 +1,6 @@
 ---
 name: shunizuiling-apis
-description: convert the smartestu website apis into ai-callable capabilities for chinese requests about 数你最灵, smartestu, assignments, homework lists, and generated questions. use this skill when the user asks to view 数你最灵作业, check smartestu homework, list assignments for the fixed course 1436, or fetch questions for a homework id. this skill logs in with environment variables snzl_id and snzl_pswd, uses school code scnu, returns natural-language chinese summaries, and can be extended with more smartestu endpoints later.
+description: convert the smartestu website apis into ai-callable capabilities for chinese requests about 数你最灵, smartestu, assignments, homework lists, and exercise marks/feedback. use this skill when the user asks to view 数你最灵作业, check smartestu homework, list assignments for the fixed course 1436, or inspect scores, deductions, and feedback for a homework id. never use Smartestu generated-questions as user-facing homework content, because it returns AI-generated difficulty variants that can be mistaken for the real assignment. this skill logs in with environment variables snzl_id and snzl_pswd, uses school code scnu, returns natural-language chinese summaries, and can be extended with more smartestu endpoints later.
 ---
 
 # smartestu openclaw
@@ -12,8 +12,8 @@ Use this skill to turn the fixed Smartestu student workflow into reliable AI act
 1. Log in to Smartestu with `SNZL_ID` and `SNZL_PSWD`.
 2. Query the student's course list.
 3. Query homework for the appropriate course (resolved dynamically from the course query; no hard-coded course id).
-4. Query generated questions for a specific homework id.
-5. Query per-exercise marks, deductions, and feedback for a specific homework id.
+4. Query per-exercise marks, deductions, and feedback for a specific homework id.
+5. Keep a compatibility path for generated questions, but rewrite generated-question content to an empty list before returning it.
 6. Explain the result in natural Chinese instead of dumping raw API output, unless the user explicitly asks for raw JSON.
 
 ## Fixed constants
@@ -38,24 +38,38 @@ Follow these steps in order.
 1. Read the request and map it to one of these intents:
    - **查看数你最灵作业 / 查看作业 / 数你最灵有哪些作业** → list homeworks for the resolved course id (see Course resolution)
    - **查看课程 / 数你最灵课程** → query the student's courses first
-   - **查看某个作业的题目 / 获取题目 / homework id + 题目** → fetch generated questions for that homework id
    - **为什么没满分 / 看扣分点 / 看老师评语 / 看每题分数 / 看批改反馈** → fetch per-exercise marks and feedback for that homework id
+   - **查看某个作业的题目 / 获取题目 / homework id + 题目** → read the real homework content from the homework list/detail payload; do not use generated questions as the source of truth
 
 2. Run the helper script:
    - `python scripts/smartestu_api.py courses`
    - `python scripts/smartestu_api.py homeworks`
-   - `python scripts/smartestu_api.py questions <homework_id>`
    - `python scripts/smartestu_api.py exercise-marks <homework_id>`
+   - `python scripts/smartestu_api.py questions <homework_id>` only for compatibility; it may probe the endpoint internally, but it must always rewrite the returned generated-question content to an empty payload (`questions: []`, `totalCount: 0`, `hiddenGeneratedQuestions: true`)
 
 3. If the user asks for homework and the course binding is uncertain, run `courses` first. If multiple courses exist, ask the user which one (or tell them to set `SNZL_COURSE_ID` / `SNZL_COURSE_NAME`).
 
 4. Read the JSON result and summarize it in natural Chinese:
    - For courses: mention course name, teacher, course id, and whether course `1436` exists.
    - For homeworks: mention homework title, homework id, status, score, deadline, and any actionable next step if those fields exist.
-   - For questions: group by question type when possible, mention count, and highlight question stem or key requirements.
+   - For a disabled `questions` response: clearly state that generated questions are intentionally hidden/emptied and should not be treated as the actual homework content.
    - For exercise marks: mention total score first, then list each exercise's score and `markText`; explicitly point out which exercise lost points and quote the platform's reason when present.
 
-5. Keep the chat output quiet:
+5. After the first successful homework list for a course, write back a compact memory summary.
+   - Purpose: future requests like “这个作业”“某次作业”“数你最灵作业” should route to 数你最灵 directly instead of guessing other platforms.
+   - Write to both places:
+     - `memory/YYYY-MM-DD.md`: append the raw daily fact that this course's homework list was fetched from 数你最灵.
+     - `MEMORY.md` (main session only): append or update a durable summary under the long-term course/platform section.
+   - Include at least:
+     - platform: 数你最灵 / smartestu
+     - course title
+     - course id
+     - each visible homework's title, homework id, status, and deadline when available
+   - Update memory again when the homework list materially changes (new homework, changed status, changed deadline, changed course binding).
+   - Prefer concise summaries; do not dump raw JSON into memory files.
+   - When the user later mentions a remembered homework title or course nickname, check memory first and treat 数你最灵 as the default source for that course.
+
+6. Keep the chat output quiet:
    - Do NOT narrate internal execution steps such as “继续查询”, “开始读取”, “整理结果”.
    - Default to no process narration at all; just return the final answer once the result is ready.
    - If a progress message is helpful because the request takes time, send only one short Chinese message: `正在查询...`
@@ -70,10 +84,13 @@ Follow these steps in order.
 ## Output rules
 
 - Default to concise natural Chinese.
+- If the helper script returns `memory_hint`, use it as the preferred compact source when writing `memory/YYYY-MM-DD.md` and `MEMORY.md`.
 - Prefer a single final answer with no execution transcript.
 - If a temporary status line is needed, use only: `正在查询...`
 - Only return raw JSON when the user explicitly asks for raw output.
 - If a field is missing, say that the platform response did not include it.
+- Never present Smartestu generated questions as the user's actual homework content.
+- If `questions` is requested, return only the emptied compatibility payload semantics (`questions: []`, `totalCount: 0`, `hiddenGeneratedQuestions: true`) and explain briefly that generated questions are not the canonical homework content.
 - When dates appear, preserve the original timestamp and optionally explain it in plain language.
 
 ## Helper script

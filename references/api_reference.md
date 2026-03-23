@@ -16,6 +16,8 @@
 
 ## supported endpoints
 
+> generated-questions endpoint is enabled again for debugging / raw payload inspection. Label it clearly as platform-generated content when presenting it to users.
+
 ### login
 `POST /api/auth/login`
 
@@ -80,5 +82,8 @@ response highlights:
 ## future extension ideas
 - homework detail lookup
 - answer draft generation
+- submission endpoints
+- grade and feedback queries
+aft generation
 - submission endpoints
 - grade and feedback queries
